@@ -1,0 +1,45 @@
+---
+- include_tasks: dependencies.yml
+
+- include_tasks: pre_config.yml
+
+- name: Install Kubernetes packages.
+  package:
+    name: "{{ item.name | default(item) }}"
+    state: "{{ item.state | default('present') }}"
+  notify: restart kubelet
+  with_items: "{{ kubernetes_packages }}"
+
+- name: Ensure kubelet is started and enabled at boot.
+  service:
+    name: kubelet
+    state: started
+    enabled: true
+
+- name: Check if Kubernetes has already been initialized.
+  stat:
+    path: /etc/kubernetes/admin.conf
+  register: kubernetes_init_stat
+
+# Set up control plane.
+- include_tasks: control_plane.yml
+  when: kubernetes_role == 'control_plane'
+
+# Set up nodes.
+- name: Get the kubeadm join command from the Kubernetes control plane.
+  command: kubeadm token create --print-join-command
+  changed_when: false
+  when: kubernetes_role == 'control_plane'
+  register: kubernetes_join_command_result
+
+- name: Set the kubeadm join command globally.
+  set_fact:
+    kubernetes_join_command: >
+      {{ kubernetes_join_command_result.stdout }}
+  when: kubernetes_join_command_result.stdout is defined
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  with_items: "{{ groups['all'] }}"
+
+- include_tasks: nodes.yml
+  when: kubernetes_role == 'node'

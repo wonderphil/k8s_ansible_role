@@ -1,0 +1,36 @@
+---
+- name: get containerd config
+  command: >
+    containerd config default
+  register: containerd_default
+
+- name: Write containerd file
+  copy:
+    dest: /etc/containerd/config.toml
+    content: "{{ containerd_default.stdout }}"
+    owner: root
+    group: root
+    mode: 0644
+  when: containerd_default.changed
+
+- name: Disable the disabled_plugins = ["cri"]
+  replace:
+    path: /etc/containerd/config.toml
+    regexp: '^disabled_plugins = \[\"cri\"\]'
+    replace: ' '
+  register: cri_replace
+  when: containerd_default.changed
+
+- name: add cgroupDriver lines to containerd config
+  replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+  register: systemd_cgroup_replace
+  when: containerd_default.changed
+
+- name: restart containerd
+  service:
+    name: containerd
+    state: restarted
+  when: (cri_replace.changed) or (systemd_cgroup_replace.changed)
